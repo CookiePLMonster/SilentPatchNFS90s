@@ -1,0 +1,4 @@
+[submodule "source/Utils"]
+	path = source/Utils
+	url = https://github.com/CookiePLMonster/ModUtils.git
+	branch = master

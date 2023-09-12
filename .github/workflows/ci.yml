@@ -1,0 +1,44 @@
+name: CI
+on: [push, pull_request]
+
+env:
+    name: SilentPatchNFS90s
+
+jobs:
+    build:
+        name: Build
+        runs-on: windows-2022
+        strategy:
+            matrix:
+                configuration: [Release, Shipping]
+
+        steps:
+            - name: Checkout the repository
+              uses: actions/checkout@v4
+              with:
+                submodules: recursive
+            # - name: Cache vcpkg
+            #   uses: actions/cache@v3
+            #   with:
+            #     path: vcpkg_installed
+            #     key: ${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
+            - name: Setup Premake5
+              uses: abel0b/setup-premake@v2.3
+              with:
+                version: 5.0.0-beta2
+            - name: Add MSBuild to PATH
+              uses: microsoft/setup-msbuild@v1.3
+            - name: Compile ${{ matrix.configuration }}
+              run: |
+                premake5 vs2022
+                msbuild build/${{ env.name }}.sln /t:rebuild /p:Configuration=${{ matrix.configuration }}
+            - name: Upload artifacts
+              uses: actions/upload-artifact@v3
+              with:
+                name: ${{ env.name }}-${{ matrix.configuration }}
+                if-no-files-found: error
+                path: |
+                  build/bin/**/*.asi
+                  build/bin/**/*.dll
+                  build/bin/**/*.exe
+                  build/bin/**/*.pdb
