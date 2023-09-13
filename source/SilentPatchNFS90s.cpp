@@ -191,4 +191,15 @@ void OnInitializeHook()
 			Memory::VP::InjectHook(&SetProcessAffinityMask, AffinityChanges::SetProcessAffinityMask_Stub, HookType::Jump);
 		}
 	}
+
+
+	// NFS4: Fix jittery mouse
+	try
+	{
+		auto get_device_data = get_pattern("83 7D F4 00 0F 84 ? ? ? ? 89 1D", 4 + 1);
+
+		// je -> jge
+		Patch<uint8_t>(get_device_data, 0x8D);
+	}
+	TXN_CATCH();
 }
