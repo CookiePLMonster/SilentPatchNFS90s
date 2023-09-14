@@ -171,6 +171,41 @@ namespace StreamThreadAffinity
 }
 
 
+namespace NFS2SEMovieRaceFix
+{
+	static HANDLE startupEvent;
+	void* orgCreateMutex;
+	__declspec(naked) void* CreateMutex_SetUpStartupEvent()
+	{
+		WATCOM_PROLOG_0_PARAMS;
+
+		startupEvent = CreateEvent(nullptr, FALSE, TRUE, nullptr);
+		_asm call orgCreateMutex
+
+		WATCOM_EPILOG_0_PARAMS;
+	}
+
+	__declspec(naked) void SignalStartup()
+	{
+		WATCOM_PROLOG_0_PARAMS;
+
+		SetEvent(startupEvent);
+
+		WATCOM_EPILOG_0_PARAMS;
+	}
+
+	__declspec(naked) void WaitForStartup()
+	{
+		WATCOM_PROLOG_0_PARAMS;
+
+		WaitForSingleObject(startupEvent, INFINITE);
+		CloseHandle(startupEvent);
+
+		WATCOM_EPILOG_0_PARAMS;
+	}
+}
+
+
 void OnInitializeHook()
 {
 	using namespace Memory;
@@ -229,6 +264,22 @@ void OnInitializeHook()
 			Memory::VP::InjectHook(&SetProcessAffinityMask, AffinityChanges::SetProcessAffinityMask_Stub, HookType::Jump);
 		}
 	}
+
+
+	// NFS2SE: Fix a potential race on starting the movie decoding thread
+	try
+	{
+		using namespace NFS2SEMovieRaceFix;
+
+		auto create_event = get_pattern("89 86 A4 00 00 00 E8 ? ? ? ? 89 86 AC 00 00 00", 6);
+		auto wait_on_event = get_pattern("8B 86 A4 00 00 00 E8 ? ? ? ? 89 F0", 6);
+		auto signal_event = get_pattern("31 C0 E8 ? ? ? ? BF 01 00 00 00 31 ED", 2);
+
+		InterceptCall(create_event, orgCreateMutex, CreateMutex_SetUpStartupEvent);
+		InjectHook(wait_on_event, WaitForStartup);
+		InjectHook(signal_event, SignalStartup);
+	}
+	TXN_CATCH();
 
 
 	// NFS4: Fix jittery mouse
