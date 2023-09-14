@@ -206,6 +206,19 @@ namespace NFS2SEMovieRaceFix
 }
 
 
+__declspec(naked) void NFS2SE_MouseZeroEax()
+{
+	_asm
+	{
+		mov		ebx, ecx
+		shl		ebx, 4
+		xor		eax, eax
+		xor		edx, edx
+		ret
+	}
+}
+
+
 void OnInitializeHook()
 {
 	using namespace Memory;
@@ -278,6 +291,20 @@ void OnInitializeHook()
 		InterceptCall(create_event, orgCreateMutex, CreateMutex_SetUpStartupEvent);
 		InjectHook(wait_on_event, WaitForStartup);
 		InjectHook(signal_event, SignalStartup);
+	}
+	TXN_CATCH();
+
+
+	// NFS2: Fix jittery mouse
+	try
+	{
+		auto get_device_data = get_pattern("8B 10 50 FF 52 28 89 C2 85 C0 0F 85", 10 + 1);
+		auto zero_eax = get_pattern("89 CB C1 E3 04");
+
+		// jne -> js
+		Patch<uint8_t>(get_device_data, 0x88);
+		// Add xor eax, eax
+		InjectHook(zero_eax, NFS2SE_MouseZeroEax, HookType::Call);
 	}
 	TXN_CATCH();
 
