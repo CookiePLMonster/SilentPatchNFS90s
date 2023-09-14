@@ -5,6 +5,36 @@
 #include "Utils/Patterns.h"
 #include "Utils/ScopedUnprotect.hpp"
 
+// Macroes for Watcom register wrapper functions
+#define WATCOM_PROLOG_0_PARAMS \
+					_asm push ebp \
+					_asm mov ebp, esp \
+					_asm sub esp, __LOCAL_SIZE \
+					_asm push ebx \
+					_asm push ecx \
+					_asm push edx \
+					_asm push esi \
+					_asm push edi
+
+
+#define WATCOM_EPILOG_0_PARAMS \
+					_asm pop edi \
+					_asm pop esi \
+					_asm pop edx \
+					_asm pop ecx \
+					_asm pop ebx \
+					_asm mov esp, ebp \
+					_asm pop ebp \
+					_asm ret
+
+#define WATCOM_PROLOG_1_PARAM \
+					void* arg1; \
+					WATCOM_PROLOG_0_PARAMS \
+					_asm mov [arg1], eax
+
+#define WATCOM_EPILOG_1_PARAM WATCOM_EPILOG_0_PARAMS
+
+
 // Based very heavily on a fix for a similar issue in NFS Underground 2
 // https://github.com/ThirteenAG/WidescreenFixesPack/pull/1045
 // by CrabJournal
@@ -115,36 +145,28 @@ namespace AffinityChanges
 
 namespace StreamThreadAffinity
 {
-	// StreamThread is an usercall with a parameter in eax
-	static void* orgStreamThread;
-	__declspec(naked) void StreamThread_Wrap()
+	// StreamThread_NFS2SE is a Watcom register call without parameters
+	static void* orgStreamThread_NFS2SE;
+	__declspec(naked) void StreamThread_NFS2SE_Wrap()
 	{
-		void* eaxParam;
-		_asm
-		{
-			push	ebp
-			mov		ebp, esp
-			sub		esp, __LOCAL_SIZE
-			push	ebx
-			push	ecx
-			push	edx
-			push	esi
-			mov		[eaxParam], eax
-		}
+		WATCOM_PROLOG_0_PARAMS;
+		SetThreadAffinityMask(GetCurrentThread(), AffinityChanges::gameThreadAffinity);
+		_asm call orgStreamThread_NFS2SE
+		WATCOM_EPILOG_0_PARAMS;
+	}
+
+	// StreamThread_NFS4 is a Watcom register call with a parameter in eax
+	static void* orgStreamThread_NFS4;
+	__declspec(naked) void StreamThread_NFS4_Wrap()
+	{
+		WATCOM_PROLOG_1_PARAM;
 		SetThreadAffinityMask(GetCurrentThread(), AffinityChanges::gameThreadAffinity);
 		_asm
 		{
-			mov		eax, [eaxParam]
-			call	orgStreamThread
-
-			pop		esi
-			pop		edx
-			pop		ecx
-			pop		ebx
-			mov		esp, ebp
-			pop		ebp
-			retn
-		}
+			mov		eax, [arg1]
+			call	orgStreamThread_NFS4
+		}	
+		WATCOM_EPILOG_1_PARAM;
 	}
 }
 
@@ -162,17 +184,33 @@ void OnInitializeHook()
 		bool bPinnedSpecificThreads = false;
 		bool bModifiedImports = false;
 
+		// NFS2SE: Try to pin only the stream decoding thread (main thread is already pinned)
+		// If that fails, pin all game threads as fallback
+		if (!bPinnedSpecificThreads) try
+		{
+			using namespace StreamThreadAffinity;
+
+			// Make this pattern long to minimize the risk of false positives
+			auto start_stream_thread = get_pattern<void*>("50 31 D2 B8 ? ? ? ? E8 ? ? ? ? 8B 86 A4 00 00 00", 3 + 1);
+
+			orgStreamThread_NFS2SE = *start_stream_thread;
+			*start_stream_thread = StreamThread_NFS2SE_Wrap;
+
+			bPinnedSpecificThreads = true;
+		}
+		TXN_CATCH();
+
 		// NFS4: Try to pin only the stream decoding threads (main thread is already pinned)
 		// If that fails, pin all game threads as fallback
-		try
+		if (!bPinnedSpecificThreads) try
 		{
 			using namespace StreamThreadAffinity;
 
 			// Make this pattern long to minimize the risk of false positives
 			auto start_stream_thread = get_pattern<void*>("50 31 DB 89 48 54 6A FF B9 01 00 00 00 B8 ? ? ? ? E8 ? ? ? ? 85 C0", 6 + 2 + 5 + 1);
 
-			orgStreamThread = *start_stream_thread;
-			*start_stream_thread = StreamThread_Wrap;
+			orgStreamThread_NFS4 = *start_stream_thread;
+			*start_stream_thread = StreamThread_NFS4_Wrap;
 
 			bPinnedSpecificThreads = true;
 		}
