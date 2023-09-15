@@ -5,6 +5,8 @@
 #include "Utils/Patterns.h"
 #include "Utils/ScopedUnprotect.hpp"
 
+#include <filesystem>
+
 // Macroes for Watcom register wrapper functions
 #define WATCOM_PROLOG_0_PARAMS \
 					_asm push ebp \
@@ -35,6 +37,30 @@
 #define WATCOM_EPILOG_1_PARAM WATCOM_EPILOG_0_PARAMS
 
 
+// INI file stuff
+bool ShouldEnableAffinityChanges()
+{
+	// Try Modern Patch INI files - INI file named like the EXE + section name as the EXE's stem
+	wchar_t exePath[MAX_PATH];
+	GetModuleFileNameW(GetModuleHandle(nullptr), exePath, MAX_PATH);
+	std::filesystem::path exeFSPath(exePath);
+	const std::wstring section = exeFSPath.stem().wstring();
+	const std::wstring iniPath = exeFSPath.replace_extension(L".ini").wstring();
+
+	const UINT singleProcAffinity = GetPrivateProfileIntW(section.c_str(), L"SingleProcAffinity", -1, iniPath.c_str());
+	if (singleProcAffinity != -1)
+	{
+		if (singleProcAffinity != 0)
+		{
+			// Don't enable our changes if they're specifically requested to be disabled
+			const UINT spAffinity = GetPrivateProfileIntW(section.c_str(), L"SilentPatchAffinity", -1, iniPath.c_str());
+			return spAffinity != 0;
+		}
+	}
+	return false;
+}
+
+
 // Based very heavily on a fix for a similar issue in NFS Underground 2
 // https://github.com/ThirteenAG/WidescreenFixesPack/pull/1045
 // by CrabJournal
@@ -44,21 +70,24 @@ namespace AffinityChanges
 	DWORD_PTR otherThreadsAffinity = 0;
 	static bool Init()
 	{
+		const HANDLE currentProcess = ::GetCurrentProcess();
 		DWORD_PTR processAffinity, systemAffinity;
-		if (!GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity))
+		if (!::GetProcessAffinityMask(currentProcess, &processAffinity, &systemAffinity))
 		{
 			return false;
 		}
 
-		DWORD_PTR otherCoresAff = (processAffinity - 1) & processAffinity;
+		DWORD_PTR otherCoresAff = (systemAffinity - 1) & systemAffinity;
 		if (otherCoresAff == 0) // Only one core is available for the game
 		{
 			return false;
 		}
-		gameThreadAffinity = processAffinity & ~otherCoresAff;
+		gameThreadAffinity = systemAffinity & ~otherCoresAff;
 		otherThreadsAffinity = otherCoresAff;
 
-		SetThreadAffinityMask(GetCurrentThread(), gameThreadAffinity);
+		// NFS2SE Modern Patch overrides affinity before we can prevent it
+		::SetProcessAffinityMask(currentProcess, systemAffinity);
+		::SetThreadAffinityMask(GetCurrentThread(), gameThreadAffinity);
 
 		return true;
 	}
@@ -226,8 +255,7 @@ void OnInitializeHook()
 
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule(GetModuleHandle(nullptr), ".text");
 
-	// TODO: Set that up only if SingleProcAffinity isn't 0
-	if (AffinityChanges::Init())
+	if (ShouldEnableAffinityChanges() && AffinityChanges::Init())
 	{
 		bool bPinnedSpecificThreads = false;
 		bool bModifiedImports = false;
@@ -274,7 +302,7 @@ void OnInitializeHook()
 		{
 			// Neuter SetProcessAffinityMask so Modern Patch or other solutions can't override
 			// our more fine-grained changes
-			Memory::VP::InjectHook(&SetProcessAffinityMask, AffinityChanges::SetProcessAffinityMask_Stub, HookType::Jump);
+			Memory::VP::InjectHook(&::SetProcessAffinityMask, AffinityChanges::SetProcessAffinityMask_Stub, HookType::Jump);
 		}
 	}
 
