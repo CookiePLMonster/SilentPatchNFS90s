@@ -323,7 +323,7 @@ void OnInitializeHook()
 	TXN_CATCH();
 
 
-	// NFS2: Fix jittery mouse
+	// NFS2SE: Fix jittery mouse
 	try
 	{
 		auto get_device_data = get_pattern("8B 10 50 FF 52 28 89 C2 85 C0 0F 85", 10 + 1);
@@ -333,6 +333,17 @@ void OnInitializeHook()
 		Patch<uint8_t>(get_device_data, 0x88);
 		// Add xor eax, eax
 		InjectHook(zero_eax, NFS2SE_MouseZeroEax, HookType::Call);
+	}
+	TXN_CATCH();
+
+
+	// NFS2SE: Fix button bitmask being used as a button count, making gamepad mappings impossible
+	try
+	{
+		auto inc_bitmask = get_pattern("8B 90 ? ? ? ? D3 E7 09 FA 89 90", 6);
+
+		// shl edi, cl \ or edx, edi -> inc edx \ nop
+		Patch(inc_bitmask, {0x42, 0x90, 0x90, 0x90});
 	}
 	TXN_CATCH();
 
