@@ -348,6 +348,21 @@ void OnInitializeHook()
 	TXN_CATCH();
 
 
+	// NFS2SE: Prevent the game from panicking when the controller disconnects
+	try
+	{
+		// Simplify the error handling function into just
+		// return code >= 0;
+		auto on_acquire_error = get_pattern("85 C0 74 16 83 F8 01 74 10 3D 57 00 07 80");
+
+		// not eax
+		// shr eax, 31
+		// ret
+		Patch(on_acquire_error, {0xF7, 0xD0, 0xC1, 0xE8, 0x1F, 0xC3});
+	}
+	TXN_CATCH();
+
+
 	// NFS4: Fix jittery mouse
 	try
 	{
