@@ -363,6 +363,17 @@ void OnInitializeHook()
 	TXN_CATCH();
 
 
+	// NFS3: Fix jittery mouse
+	try
+	{
+		auto get_device_data = get_pattern("FF 51 28 85 C0 0F 84 ? ? ? ? 31 D2 8B 4D FC", 5 + 1);
+
+		// je -> jge
+		Patch<uint8_t>(get_device_data, 0x8D);
+	}
+	TXN_CATCH();
+
+
 	// NFS4: Fix jittery mouse
 	try
 	{
