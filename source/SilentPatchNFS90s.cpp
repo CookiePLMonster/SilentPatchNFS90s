@@ -383,4 +383,26 @@ void OnInitializeHook()
 		Patch<uint8_t>(get_device_data, 0x8D);
 	}
 	TXN_CATCH();
+
+
+	// NFS2SE/NFS4: Re-enable Alt+F4
+	try
+	{
+		auto wm_keydown = get_pattern("B8 01 00 00 00 5F 5E 5B C2 18 00");
+
+		// xor eax, eax \ nop
+		Patch(wm_keydown, {0x31, 0xC0, 0x90, 0x90, 0x90});
+	}
+	TXN_CATCH();
+
+
+	// NFS3: Re-enable Alt+F4
+	try
+	{
+		auto wm_keydown = get_pattern("83 E3 01 E8 ? ? ? ? EB ? B8 01 00 00 00 5D 5F 5E 5B C2 18 00", 3 + 5 + 2);
+
+		// xor eax, eax \ nop
+		Patch(wm_keydown, {0x31, 0xC0, 0x90, 0x90, 0x90});
+	}
+	TXN_CATCH();
 }
