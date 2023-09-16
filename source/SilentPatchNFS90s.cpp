@@ -247,6 +247,19 @@ __declspec(naked) void NFS2SE_MouseZeroEax()
 	}
 }
 
+__declspec(naked) void NFS4_PollZeroEdi()
+{
+	// if (edi >= 0) edi = 0;
+	_asm
+	{
+		mov		edi, eax
+		sar		edi, 31
+		and		edi, eax
+		test	edi, edi
+		ret
+	}
+}
+
 
 void OnInitializeHook()
 {
@@ -381,6 +394,28 @@ void OnInitializeHook()
 
 		// je -> jge
 		Patch<uint8_t>(get_device_data, 0x8D);
+	}
+	TXN_CATCH();
+
+	
+	// NFS2SE/NFS3: Make IDirectInputDevice::Poll() not treat non-zero success codes as errors
+	try
+	{
+		auto poll = get_pattern("FF 52 64 85 C0 74 ? 3D 1E 00 07 80", 3 + 2);
+
+		// je -> jge
+		Patch<uint8_t>(poll, 0x7D);
+	}
+	TXN_CATCH();
+
+
+	// NFS4: Make IDirectInputDevice::Poll() not treat non-zero success codes as errors
+	try
+	{
+		auto poll = get_pattern("8B 7D F4 85 FF 74 ? 81 7D F4 1E 00 07 80");
+
+		// 'flatten' edi not to contain positive numbers
+		InjectHook(poll, NFS4_PollZeroEdi, HookType::Call);
 	}
 	TXN_CATCH();
 
