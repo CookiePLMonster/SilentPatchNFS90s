@@ -5,6 +5,9 @@
 #include "Utils/Patterns.h"
 #include "Utils/ScopedUnprotect.hpp"
 
+#define DIRECTINPUT_VERSION 0x500
+#include <dinput.h>
+
 #include <filesystem>
 
 // Macroes for Watcom register wrapper functions
@@ -261,6 +264,39 @@ __declspec(naked) void NFS4_PollZeroEdi()
 }
 
 
+namespace NFS5EnumDevices
+{
+	static HRESULT WINAPI EnumDInputDevices(LPDIRECTINPUTA dinput, DWORD /*dwDevType*/, LPDIENUMDEVICESCALLBACKA lpCallback, LPVOID pvRef, DWORD /*dwFlags*/)
+	{
+		// Instead of enumerating all devices, enumerate only keyboards and joysticks + only attached devices
+		// Enumerated mice are ignored by the game so don't bother
+		HRESULT hr = dinput->EnumDevices(DIDEVTYPE_KEYBOARD, lpCallback, pvRef, DIEDFL_ATTACHEDONLY);
+		if (FAILED(hr))
+		{
+			return hr;
+		}
+		hr = dinput->EnumDevices(DIDEVTYPE_JOYSTICK, lpCallback, pvRef, DIEDFL_ATTACHEDONLY);
+		if (FAILED(hr))
+		{
+			return hr;
+		}
+
+		return S_OK;
+	}
+	static const auto pEnumDInputDevices = &EnumDInputDevices;
+	static const auto pFakeVMT = reinterpret_cast<uintptr_t>(&pEnumDInputDevices) - 0x10;
+	__declspec(naked) void SetPtrToEnumDevices()
+	{
+		_asm
+		{
+			mov		[esp+14h-4], esi
+			mov		ecx, [pFakeVMT]
+			ret
+		}
+	}
+}
+
+
 void OnInitializeHook()
 {
 	using namespace Memory;
@@ -438,6 +474,19 @@ void OnInitializeHook()
 
 		// xor eax, eax \ nop
 		Patch(wm_keydown, {0x31, 0xC0, 0x90, 0x90, 0x90});
+	}
+	TXN_CATCH();
+
+
+	// NFS Porsche: Fix device enumeration to only enumerate keyboard and joysticks AND only attached devices
+	try
+	{
+		using namespace NFS5EnumDevices;
+
+		auto enum_devices = pattern("56 52 89 74 24 0C 8B 08").get_one();
+
+		Nop(enum_devices.get<void>(2), 1);
+		InjectHook(enum_devices.get<void>(3), SetPtrToEnumDevices, HookType::Call);
 	}
 	TXN_CATCH();
 }
