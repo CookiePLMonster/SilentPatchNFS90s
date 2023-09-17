@@ -347,7 +347,7 @@ namespace TextPasteSupport
 				currentClipboardText = GetClipboardText(hWnd);
 				if (!currentClipboardText.empty())
 				{
-					SetTimer(hWnd, reinterpret_cast<UINT_PTR>(&currentClipboardText), USER_TIMER_MINIMUM * 2, nullptr);
+					SetTimer(hWnd, reinterpret_cast<UINT_PTR>(&currentClipboardText), 35, nullptr);
 					sendChar();
 				}
 				else
