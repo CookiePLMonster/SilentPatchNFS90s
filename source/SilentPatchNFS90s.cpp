@@ -390,6 +390,65 @@ namespace TextPasteSupport
 }
 
 
+// I'm pretty sure Verok's thrash drivers used to be open source, but I can't find them anymore...
+namespace OGLThrashDriverLeak
+{
+	static decltype(::free)** pOrgThrashDriverFree;
+	static decltype(::free)** pOrgThrashDriverFreeFunc;
+	static void ThrashDriverFree(void* data)
+	{
+		if (*pOrgThrashDriverFreeFunc != nullptr)
+		{
+			(*pOrgThrashDriverFreeFunc)(data);
+		}
+		else
+		{
+			(*pOrgThrashDriverFree)(data);
+		}
+	}
+
+	static void* pLastUnlockedRect = nullptr;
+	static void (__thiscall *orgThrashUnlockWindow_Internal)(void* pThis);
+	static void __fastcall ThrashUnlockWindow_Internal_LeakFix(void* pThis)
+	{
+		orgThrashUnlockWindow_Internal(pThis);
+
+		void* lastRect = std::exchange(pLastUnlockedRect, pThis);
+		if (lastRect != nullptr)
+		{
+			void* pBuffer = *static_cast<void**>(lastRect);
+			ThrashDriverFree(pBuffer);
+			ThrashDriverFree(lastRect);
+		}
+	}
+
+	static decltype(LoadLibraryA)** pOrgLoadLibraryA;
+	HMODULE WINAPI LoadLibraryA_FixThrashDriver(LPCSTR lpLibFileName)
+	{
+		HMODULE hThrashDriver = (*pOrgLoadLibraryA)(lpLibFileName);
+		if (hThrashDriver != nullptr)
+		{
+			using namespace Memory::VP;
+			using namespace hook::txn;
+
+			try
+			{
+				auto org_free = make_module_pattern(hThrashDriver, "FF 15 ? ? ? ? 83 C4 04 FF 74 24").get_first<decltype(::free)**>(2);
+				auto org_free_func = make_module_pattern(hThrashDriver, "A1 ? ? ? ? 56 85 C0 74 04 FF D0").get_first<decltype(::free)**>(1);
+				auto unlockwindow_internal = make_module_pattern(hThrashDriver, "8B 4D 08 E8 ? ? ? ? A1").get_first<void>(3);
+
+				pOrgThrashDriverFree = *org_free;
+				pOrgThrashDriverFreeFunc = *org_free_func;
+				InterceptCall(unlockwindow_internal, orgThrashUnlockWindow_Internal, ThrashUnlockWindow_Internal_LeakFix);
+			}
+			TXN_CATCH();
+		}
+		return hThrashDriver;
+	}
+	static auto* pLoadLibraryA_FixThrashDriver = &LoadLibraryA_FixThrashDriver;
+}
+
+
 void OnInitializeHook()
 {
 	using namespace Memory;
@@ -571,7 +630,7 @@ void OnInitializeHook()
 	TXN_CATCH();
 
 
-	// NFS Posche: Re-enable Alt+F4
+	// NFS Porsche: Re-enable Alt+F4
 	try
 	{
 		auto wm_keydown = pattern("5F 5E B8 01 00 00 00 5B C2 18 00").count(2);
@@ -684,6 +743,18 @@ void OnInitializeHook()
 		auto register_class = get_pattern<decltype(RegisterClassA)**>("89 44 24 50 FF 15 ? ? ? ? 66 85 C0", 4 + 2);
 
 		pOrgRegisterClassA = std::exchange(*register_class, &pRegisterClassA_PasteSupport);
+	}
+	TXN_CATCH();
+
+
+	// NFS Porsche: Fix a memory leak in Verok's thrash drivers causing crashes in multiplayer
+	try
+	{
+		using namespace OGLThrashDriverLeak;
+
+		auto load_library = get_pattern<decltype(LoadLibraryA)**>("8B 35 ? ? ? ? 83 C4 0C 8D 4C 24 14", 2);
+
+		pOrgLoadLibraryA = std::exchange(*load_library, &pLoadLibraryA_FixThrashDriver);
 	}
 	TXN_CATCH();
 }
