@@ -448,6 +448,67 @@ namespace OGLThrashDriverLeak
 	static auto* pLoadLibraryA_FixThrashDriver = &LoadLibraryA_FixThrashDriver;
 }
 
+namespace KeybdEventStub
+{
+	void WINAPI keybd_event_Stub(BYTE /*bVk*/, BYTE /*bScan*/, DWORD /*dwFlags*/, ULONG_PTR /*dwExtraInfo*/)
+	{
+
+	}
+
+	static void ReplaceFunction(void** funcPtr)
+	{
+		DWORD dwProtect;
+
+		auto func = reinterpret_cast<decltype(::keybd_event)**>(funcPtr);
+
+		VirtualProtect(func, sizeof(*func), PAGE_READWRITE, &dwProtect);
+		*func = &keybd_event_Stub;
+		VirtualProtect(func, sizeof(*func), dwProtect, &dwProtect);
+	}
+
+	static void RedirectImports()
+	{
+		const DWORD_PTR instance = reinterpret_cast<DWORD_PTR>(GetModuleHandle(nullptr));
+		const PIMAGE_NT_HEADERS ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(instance + reinterpret_cast<PIMAGE_DOS_HEADER>(instance)->e_lfanew);
+
+		// Find IAT
+		PIMAGE_IMPORT_DESCRIPTOR pImports = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(instance + ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+		for ( ; pImports->Name != 0; pImports++ )
+		{
+			if ( _stricmp(reinterpret_cast<const char*>(instance + pImports->Name), "user32.dll") == 0 )
+			{
+				if ( pImports->OriginalFirstThunk != 0 )
+				{
+					const PIMAGE_THUNK_DATA pThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(instance + pImports->OriginalFirstThunk);
+
+					for ( ptrdiff_t j = 0; pThunk[j].u1.AddressOfData != 0; j++ )
+					{
+						if ( strcmp(reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(instance + pThunk[j].u1.AddressOfData)->Name, "keybd_event") == 0 )
+						{
+							void** pAddress = reinterpret_cast<void**>(instance + pImports->FirstThunk) + j;
+							ReplaceFunction(pAddress);
+							return;
+						}
+					}
+				}
+				else
+				{
+					void** pFunctions = reinterpret_cast<void**>(instance + pImports->FirstThunk);
+
+					for ( ptrdiff_t j = 0; pFunctions[j] != nullptr; j++ )
+					{
+						if ( pFunctions[j] == &keybd_event )
+						{
+							ReplaceFunction(&pFunctions[j]);
+							return;
+						}
+					}
+				}
+			}
+		}
+	}
+}
 
 void OnInitializeHook()
 {
@@ -455,6 +516,9 @@ void OnInitializeHook()
 	using namespace hook::txn;
 
 	auto Protect = ScopedUnprotect::UnprotectSectionOrFullModule(GetModuleHandle(nullptr), ".text");
+
+	// Make games not disable Num Lock/Caps Lock/Scroll Lock
+	KeybdEventStub::RedirectImports();
 
 	if (ShouldEnableAffinityChanges() && AffinityChanges::Init())
 	{
