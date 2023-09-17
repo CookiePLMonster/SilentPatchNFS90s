@@ -297,6 +297,99 @@ namespace NFS5EnumDevices
 }
 
 
+namespace TextPasteSupport
+{
+	static std::string GetClipboardText(HWND hWnd)
+	{
+		std::string result;
+
+		if (IsClipboardFormatAvailable(CF_TEXT))
+		{
+			if (OpenClipboard(hWnd))
+			{
+				HGLOBAL hClipboardText = GetClipboardData(CF_TEXT);
+				if (hClipboardText != nullptr)
+				{
+					LPSTR lpStr = static_cast<LPSTR>(GlobalLock(hClipboardText));
+					if (lpStr != nullptr)
+					{
+						result.assign(lpStr);
+						GlobalUnlock(hClipboardText);
+					}
+				}
+
+				CloseClipboard();
+			}
+		}
+
+		return result;
+	}
+
+	static std::string currentClipboardText;
+	static decltype(DefWindowProcA)* orgWndProc;
+	LRESULT WINAPI WindowProc_PasteSupport_Delayed(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
+	{
+		auto sendChar = [=]
+			{
+				SendMessageA(hWnd, WM_CHAR, currentClipboardText.front(), 1);
+				currentClipboardText.erase(currentClipboardText.begin());
+
+				if (currentClipboardText.empty())
+				{
+					KillTimer(hWnd, reinterpret_cast<UINT_PTR>(&currentClipboardText));
+				}
+			};
+
+		if (Msg == WM_CHAR)
+		{
+			if (wParam == 0x16) // Ctrl+V
+			{
+				currentClipboardText = GetClipboardText(hWnd);
+				if (!currentClipboardText.empty())
+				{
+					SetTimer(hWnd, reinterpret_cast<UINT_PTR>(&currentClipboardText), USER_TIMER_MINIMUM * 2, nullptr);
+					sendChar();
+				}
+				else
+				{
+					KillTimer(hWnd, reinterpret_cast<UINT_PTR>(&currentClipboardText));
+				}
+				return 0;
+			}
+		}
+		else if (Msg == WM_TIMER && wParam == reinterpret_cast<UINT_PTR>(&currentClipboardText))
+		{
+			sendChar();
+		}
+		return orgWndProc(hWnd, Msg, wParam, lParam);
+	}
+
+	LRESULT WINAPI WindowProc_PasteSupport(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
+	{
+		if (Msg == WM_CHAR)
+		{
+			if (wParam == 0x16) // Ctrl+V
+			{
+				for (char ch : GetClipboardText(hWnd))
+				{
+					SendMessageA(hWnd, WM_CHAR, ch, 1);
+				}
+				return 0;
+			}
+		}
+		return orgWndProc(hWnd, Msg, wParam, lParam);
+	}
+
+	static decltype(RegisterClassA)** pOrgRegisterClassA;
+	ATOM WINAPI RegisterClassA_PasteSupport(const WNDCLASSA* lpWndClass)
+	{
+		orgWndProc = std::exchange(const_cast<WNDCLASSA*>(lpWndClass)->lpfnWndProc, WindowProc_PasteSupport);
+		return (*pOrgRegisterClassA)(lpWndClass);
+	}
+	static auto* pRegisterClassA_PasteSupport = &RegisterClassA_PasteSupport;
+}
+
+
 void OnInitializeHook()
 {
 	using namespace Memory;
@@ -531,4 +624,53 @@ void OnInitializeHook()
 		}
 		TXN_CATCH()
 	}
+
+
+	// NFS2SE: Basic text paste support
+	try
+	{
+		using namespace TextPasteSupport;
+
+		auto wnd_proc = get_pattern<decltype(DefWindowProcA)*>("BA ? ? ? ? 8B 3D ? ? ? ? 31 C9 89 04 24", 1);
+
+		orgWndProc = *std::exchange(*wnd_proc, WindowProc_PasteSupport_Delayed);
+	}
+	TXN_CATCH();
+
+
+	// NFS3: Basic text paste support
+	try
+	{
+		using namespace TextPasteSupport;
+
+		auto wnd_proc = get_pattern<decltype(DefWindowProcA)*>("C7 45 ? ? ? ? ? 89 75 CC FF 35", 3);
+
+		orgWndProc = *std::exchange(*wnd_proc, WindowProc_PasteSupport);
+	}
+	TXN_CATCH();
+
+
+	// NFS4: Basic text paste support
+	try
+	{
+		using namespace TextPasteSupport;
+
+		auto wnd_proc = get_pattern<decltype(DefWindowProcA)*>("B9 0B 00 00 00 BE ? ? ? ? A1 ? ? ? ? 8B 15 ? ? ? ? 31 FF", 5 + 1);
+
+		orgWndProc = *std::exchange(*wnd_proc, WindowProc_PasteSupport);
+	}
+	TXN_CATCH();
+
+
+	// NFS Porsche: Basic text paste support
+	try
+	{
+		// Modern Patch overwrites WndProc and doesn't call back to the original function - so hook RegisterClass instead
+		using namespace TextPasteSupport;
+
+		auto register_class = get_pattern<decltype(RegisterClassA)**>("89 44 24 50 FF 15 ? ? ? ? 66 85 C0", 4 + 2);
+
+		pOrgRegisterClassA = std::exchange(*register_class, &pRegisterClassA_PasteSupport);
+	}
+	TXN_CATCH();
 }
