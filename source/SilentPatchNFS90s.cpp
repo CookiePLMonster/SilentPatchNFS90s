@@ -489,4 +489,46 @@ void OnInitializeHook()
 		InjectHook(enum_devices.get<void>(3), SetPtrToEnumDevices, HookType::Call);
 	}
 	TXN_CATCH();
+
+
+	// NFS2SE: Fix Verok's Modern Patch using splitscreen viewport dimensions for multiplayer
+	HMODULE modernPatchModule;
+	if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, L"nfs2se.p", &modernPatchModule) != FALSE)
+	{			
+		// Rebuild a "damaged" SetViewports function and apply the 1px splitscreen seam fix in a less invasive way
+		try
+		{
+			auto broken_set_viewports = pattern("E9 ? ? ? ? ? ? ? ? ? 75 6B 68 F0 00 00 00").get_one();
+
+			// Only patch if it's calling into Modern Patch DLL, in case somebody else is also re-routing this function
+			uintptr_t reroutedCall;
+			ReadCall(broken_set_viewports.get<void>(), reroutedCall);
+			HMODULE reroutedCallModule;
+			if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT|GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCTSTR>(reroutedCall), &reroutedCallModule) != FALSE
+				&& modernPatchModule == reroutedCallModule)
+			{
+				// push ebx
+				// push ecx
+				// push edx
+				// cmp [gameMode], 1
+				Patch(broken_set_viewports.get<void>(), {0x53, 0x51, 0x52, 0x83, 0x3D});
+
+				// Patch the argument in the stock function instead
+				Patch<uint32_t>(broken_set_viewports.get<void>(0x1A + 1), 241);
+			}
+		}
+		TXN_CATCH();
+
+		// Fixup gameMode != 0 into gameMode == 1 in an unknown function inside the Modern Patch
+		try
+		{
+			auto cmp_game_mode = make_module_pattern(modernPatchModule, "83 39 00 74 07 FE C0").get_one();
+
+			// cmp [ecx], 0 \ jz
+			// ->
+			// cmp [ecx], 1 \ jnz
+			Memory::VP::Patch(cmp_game_mode.get<void>(2), {0x1, 0x75});
+		}
+		TXN_CATCH()
+	}
 }
