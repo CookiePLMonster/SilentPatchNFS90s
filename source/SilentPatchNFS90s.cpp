@@ -571,6 +571,19 @@ void OnInitializeHook()
 	TXN_CATCH();
 
 
+	// NFS Posche: Re-enable Alt+F4
+	try
+	{
+		auto wm_keydown = pattern("5F 5E B8 01 00 00 00 5B C2 18 00").count(2);
+		wm_keydown.for_each_result([](pattern_match match)
+		{
+			// xor eax, eax \ nop
+			Patch(match.get<void>(2), {0x31, 0xC0, 0x90, 0x90, 0x90});
+		});
+	}
+	TXN_CATCH();
+
+
 	// NFS Porsche: Fix device enumeration to only enumerate keyboard and joysticks AND only attached devices
 	try
 	{
