@@ -370,8 +370,14 @@ namespace TextPasteSupport
 		{
 			if (wParam == 0x16) // Ctrl+V
 			{
+				char lastCh = '\0';
 				for (char ch : GetClipboardText(hWnd))
 				{
+					if (std::exchange(lastCh, ch) == ch)
+					{
+						// Send a "delimiter"
+						SendMessageA(hWnd, WM_CHAR, '\x2', 1);
+					}
 					SendMessageA(hWnd, WM_CHAR, ch, 1);
 				}
 				return 0;
