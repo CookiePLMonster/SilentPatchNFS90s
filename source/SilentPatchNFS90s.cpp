@@ -364,6 +364,9 @@ namespace TextPasteSupport
 		return orgWndProc(hWnd, Msg, wParam, lParam);
 	}
 
+	// Used only by NFS Porsche
+	static bool* gKeyboardBuffer;
+
 	LRESULT WINAPI WindowProc_PasteSupport(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 	{
 		if (Msg == WM_CHAR)
@@ -382,6 +385,11 @@ namespace TextPasteSupport
 				}
 				return 0;
 			}
+		}
+		// NFS Porsche only
+		else if (Msg == WM_KILLFOCUS && gKeyboardBuffer != nullptr)
+		{
+			memset(gKeyboardBuffer, 0, 128);
 		}
 		return orgWndProc(hWnd, Msg, wParam, lParam);
 	}
@@ -813,6 +821,16 @@ void OnInitializeHook()
 		auto register_class = get_pattern<decltype(RegisterClassA)**>("89 44 24 50 FF 15 ? ? ? ? 66 85 C0", 4 + 2);
 
 		pOrgRegisterClassA = std::exchange(*register_class, &pRegisterClassA_PasteSupport);
+
+		// NFS Porsche: Clear the keyboard input buffer on WM_KILLFOCUS
+		// Fixes an issue potentially introduced by Modern Patch where the keyboard buffer doesn't get cleared on Alt+Tab
+		try
+		{
+			auto keyboard_buffer = *get_pattern<bool*>("68 ? ? ? ? E8 ? ? ? ? 8B 54 24 28 8B 44 24 20", 1);
+
+			gKeyboardBuffer = keyboard_buffer;
+		}
+		TXN_CATCH();
 	}
 	TXN_CATCH();
 
