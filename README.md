@@ -34,3 +34,6 @@ Fixes marked with ⚙️ can be configured/toggled via the INI file.
 ## Compilation requirements
 * [Premake5](https://premake.github.io/) and Visual Studio 2022 are required for project generation and compilation.
   Invoke `premake5 vs2022` in the main project directory to generate a project.
+
+## Related reads
+* [SilentPatch for NFS2: Special Edition, NFS3: Hot Pursuit, NFS4: High Stakes and NFS: Porsche Unleashed](https://cookieplmonster.github.io/2023/09/24/silentpatch-need-for-speed-classics/)
